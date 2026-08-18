@@ -1,0 +1,24 @@
+{
+  "name": "tungsteno-api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "API Node.js + Express + Sequelize para tabla diaria de precios de compra de tungsteno.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "db:sync": "node src/scripts/syncDb.js",
+    "db:seed": "node src/scripts/seed.js",
+    "import:excel": "node src/scripts/importExcelBase.js",
+    "admin:simplify": "node src/scripts/simplifyTungstenoAdmin.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "decimal.js": "^10.6.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "mysql2": "^3.23.1",
+    "sequelize": "^6.37.7",
+    "xlsx": "^0.18.5"
+  }
+}
