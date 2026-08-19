@@ -5,6 +5,7 @@ const masterDataRoutes = require("./routes/masterDataRoutes");
 const priceTableRoutes = require("./routes/priceTableRoutes");
 const { sequelize } = require("./models");
 const env = require("./config/env");
+const authMiddleware = require("./middlewares/auth.middleware");
 
 const app = express();
 
@@ -22,6 +23,7 @@ app.use(
   })
 );
 app.use(express.json({ limit: "2mb" }));
+app.use(authMiddleware);
 
 app.get("/api/tungsteno/health", async (req, res) => {
   let database = "desconectada";
