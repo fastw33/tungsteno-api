@@ -4,10 +4,23 @@ const catalogRoutes = require("./routes/catalogRoutes");
 const masterDataRoutes = require("./routes/masterDataRoutes");
 const priceTableRoutes = require("./routes/priceTableRoutes");
 const { sequelize } = require("./models");
+const env = require("./config/env");
 
 const app = express();
 
-app.use(cors());
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin || env.cors.origins.includes("*") || env.cors.origins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
+    credentials: env.cors.credentials,
+    methods: env.cors.methods.length ? env.cors.methods : undefined,
+    allowedHeaders: env.cors.allowedHeaders.length ? env.cors.allowedHeaders : undefined
+  })
+);
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/api/tungsteno/health", async (req, res) => {
