@@ -150,6 +150,54 @@ async function createClient(payload = {}) {
   return created;
 }
 
+async function createCity(payload = {}) {
+  const name = cleanText(payload.name);
+  ensureRequired(name, "El nombre de la ciudad es obligatorio");
+  const department = cleanText(payload.department);
+  const existing = await City.findOne({ where: { name, department } });
+  if (existing) {
+    return existing;
+  }
+  const created = await City.create({
+    name,
+    department,
+    isActive: payload.isActive !== false
+  });
+  await logAdminChange({
+    entityType: "city",
+    entityId: created.id,
+    action: "create",
+    beforeData: null,
+    afterData: snapshot(created),
+    note: "Ciudad creada desde Admin W"
+  });
+  return created;
+}
+
+async function createCarrier(payload = {}) {
+  const name = cleanText(payload.name);
+  ensureRequired(name, "El nombre de la transportadora es obligatorio");
+  const code = cleanText(payload.code) || name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  const existing = await Carrier.findOne({ where: { code } });
+  if (existing) {
+    return existing;
+  }
+  const created = await Carrier.create({
+    code,
+    name,
+    isActive: payload.isActive !== false
+  });
+  await logAdminChange({
+    entityType: "carrier",
+    entityId: created.id,
+    action: "create",
+    beforeData: null,
+    afterData: snapshot(created),
+    note: "Transportadora creada desde Admin W"
+  });
+  return created;
+}
+
 async function listClientPrices(filters = {}) {
   const where = {};
   if (filters.productId) {
@@ -508,6 +556,8 @@ async function createFreightRate(payload = {}) {
 module.exports = {
   createClient,
   createClientPrice,
+  createCarrier,
+  createCity,
   createFreightRate,
   createOperationalCost,
   createPricingPolicy,
