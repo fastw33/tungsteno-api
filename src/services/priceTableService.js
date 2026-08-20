@@ -707,8 +707,10 @@ async function calculatePreviewRange({
     };
   }
 
-  const operationalCost = await findOperationalCost(zone.id, targetDate);
-  if (!operationalCost) {
+  const operationalCost = zone.code === "nacional"
+    ? null
+    : await findOperationalCost(zone.id, targetDate);
+  if (zone.code !== "nacional" && !operationalCost) {
     return {
       issue: publicIssue({
         productId: period.productId,
@@ -788,7 +790,7 @@ async function calculatePreviewRange({
   });
   const calculated = calculatePrices({
     clientPriceCopKg,
-    operationalCostCopKg: operationalCost.costCopPerKg,
+    operationalCostCopKg: operationalCost?.costCopPerKg || 0,
     freightTotalCop,
     realWeightKg,
     minGrossMarginPct: policy.minGrossMarginPct,
@@ -805,7 +807,7 @@ async function calculatePreviewRange({
       zoneId: zone.id,
       weightRangeId: range.id,
       exchangeRateId: exchangeRate?.id || null,
-      operationalCostPeriodId: operationalCost.id,
+      operationalCostPeriodId: operationalCost?.id || null,
       pricingPolicyPeriodId: policy.id,
       freightRateRowId: freightRow?.id || null,
       carrierId: carrier?.id || null,
@@ -825,7 +827,7 @@ async function calculatePreviewRange({
       volumetricWeightKg,
       billableWeightKg,
       clientPriceCopKg,
-      operationalCostCopKg: operationalCost.costCopPerKg,
+      operationalCostCopKg: operationalCost?.costCopPerKg || 0,
       freightTotalCop,
       freightCopKg: calculated.freightCopKg,
       minGrossMarginPct: policy.minGrossMarginPct || policy.targetGrossMarginPct,
