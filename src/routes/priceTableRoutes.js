@@ -3,7 +3,8 @@ const {
   generateDailyPriceTable,
   getLatestPriceTable,
   getPriceTable,
-  listPriceHistory
+  listPriceHistory,
+  previewPurchasePrices
 } = require("../services/priceTableService");
 const { asyncHandler, normalizeDate } = require("../utils/http");
 
@@ -20,6 +21,16 @@ router.post(
       notes: req.body.notes || ""
     });
     res.status(201).json(table);
+  })
+);
+
+router.get(
+  "/preview",
+  asyncHandler(async (req, res) => {
+    res.json(await previewPurchasePrices({
+      tableDate: normalizeDate(req.query.tableDate),
+      clientId: req.query.clientId || null
+    }));
   })
 );
 
