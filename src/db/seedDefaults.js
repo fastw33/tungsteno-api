@@ -3,7 +3,6 @@ const {
   Currency,
   FreightRatePeriod,
   FreightRateRow,
-  OperationalCostPeriod,
   Op,
   WeightRange,
   Zone
@@ -39,11 +38,6 @@ async function upsertByUnique(model, where, payload) {
     return existing;
   }
   return model.create(payload);
-}
-
-async function createIfMissing(model, where, payload) {
-  const existing = await model.findOne({ where });
-  return existing || model.create(payload);
 }
 
 async function seedDefaults() {
@@ -83,22 +77,6 @@ async function seedDefaults() {
   for (const item of cities) {
     await upsertByUnique(City, { name: item.name, department: item.department }, item);
   }
-
-  const activeZones = await Zone.findAll();
-  for (const zone of activeZones) {
-    await createIfMissing(
-      OperationalCostPeriod,
-      { zoneId: zone.id, validFrom: "2000-01-01", validTo: "2099-12-31" },
-      {
-        zoneId: zone.id,
-        costCopPerKg: 0,
-        validFrom: "2000-01-01",
-        validTo: "2099-12-31",
-        notes: "Base inicial editable desde Admin W"
-      }
-    );
-  }
-
 }
 
 module.exports = {

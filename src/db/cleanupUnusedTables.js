@@ -16,6 +16,9 @@ async function cleanupUnusedTables() {
     for (const table of unusedTables) {
       await sequelize.query(`DROP TABLE IF EXISTS \`${table}\``);
     }
+    await sequelize.query(
+      "DELETE FROM `operational_cost_periods` WHERE `notes` = 'Base inicial editable desde Admin W' AND `cost_cop_per_kg` = 0"
+    );
   } finally {
     await sequelize.query("SET FOREIGN_KEY_CHECKS = 1");
   }
