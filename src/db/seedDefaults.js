@@ -5,8 +5,6 @@ const {
   FreightRatePeriod,
   FreightRateRow,
   OperationalCostPeriod,
-  PackageProfile,
-  PriceChangeReason,
   WeightRange,
   Zone
 } = require("../models");
@@ -44,17 +42,6 @@ const cities = [
   { name: "Cartagena", department: "Bolivar" }
 ];
 
-const changeReasons = [
-  { code: "trm", name: "Cambio por TRM" },
-  { code: "eur_rate", name: "Cambio por tasa EUR" },
-  { code: "client_price", name: "Cambio por precio cliente" },
-  { code: "freight", name: "Cambio por flete" },
-  { code: "operational_cost", name: "Cambio por gasto operativo" },
-  { code: "margin_policy", name: "Cambio por margen objetivo" },
-  { code: "new_row", name: "Fila nueva sin comparativo anterior" },
-  { code: "no_change", name: "Sin cambio relevante" }
-];
-
 async function upsertByUnique(model, where, payload) {
   const existing = await model.findOne({ where });
   if (existing) {
@@ -90,26 +77,7 @@ async function seedDefaults() {
     await upsertByUnique(City, { name: item.name, department: item.department }, item);
   }
 
-  for (const item of changeReasons) {
-    await upsertByUnique(PriceChangeReason, { code: item.code }, item);
-  }
-
   const ranges = await WeightRange.findAll();
-  for (const range of ranges) {
-    await upsertByUnique(
-      PackageProfile,
-      { weightRangeId: range.id },
-      {
-        weightRangeId: range.id,
-        name: `Caja ${range.label}`,
-        lengthCm: 30,
-        widthCm: 30,
-        heightCm: 30,
-        volumetricDivisor: 6000
-      }
-    );
-  }
-
   const activeZones = await Zone.findAll();
   for (const zone of activeZones) {
     await createIfMissing(

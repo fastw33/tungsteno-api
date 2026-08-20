@@ -743,28 +743,11 @@ async function calculatePreviewRange({
     };
   }
 
-  const packageProfile = await PackageProfile.findOne({
-    where: { weightRangeId: range.id }
-  });
-  if (!packageProfile) {
-    return {
-      issue: publicIssue({
-        productId: period.productId,
-        clientId: period.clientId,
-        cityId: city?.id || null,
-        zoneId: zone.id,
-        weightRangeId: range.id,
-        issueCode: "PACKAGE_PROFILE_MISSING",
-        message: "No hay perfil de caja para este rango."
-      })
-    };
-  }
-
   const rateToCop = period.Currency.code === "COP" ? 1 : exchangeRate.rateToCop;
   const clientPriceCopKg = money(decimal(period.pricePerKg).mul(rateToCop));
   const realWeightKg = toNumber(range.minKg);
-  const volumetricWeightKg = calculateVolumetricWeight(packageProfile);
-  const billableWeightKg = Math.max(realWeightKg, volumetricWeightKg);
+  const volumetricWeightKg = 0;
+  const billableWeightKg = realWeightKg;
   let freightTotalCop = 0;
   let freightRow = null;
   let carrier = null;
@@ -824,7 +807,6 @@ async function calculatePreviewRange({
       exchangeRateId: exchangeRate?.id || null,
       operationalCostPeriodId: operationalCost.id,
       pricingPolicyPeriodId: policy.id,
-      packageProfileId: packageProfile.id,
       freightRateRowId: freightRow?.id || null,
       carrierId: carrier?.id || null,
       originCityId: zone.code === "nacional" ? city.id : null,
