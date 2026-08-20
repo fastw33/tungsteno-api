@@ -2,6 +2,8 @@ const express = require("express");
 const {
   createClient,
   createClientPrice,
+  createCarrier,
+  createCity,
   createFreightRate,
   createOperationalCost,
   createPricingPolicy,
@@ -66,6 +68,20 @@ router.post(
   "/clients",
   asyncHandler(async (req, res) => {
     res.status(201).json(await createClient(req.body));
+  })
+);
+
+router.post(
+  "/cities",
+  asyncHandler(async (req, res) => {
+    res.status(201).json(await createCity(req.body));
+  })
+);
+
+router.post(
+  "/carriers",
+  asyncHandler(async (req, res) => {
+    res.status(201).json(await createCarrier(req.body));
   })
 );
 
