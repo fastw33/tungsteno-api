@@ -860,7 +860,7 @@ async function previewPurchasePrices({ tableDate, clientId = null }) {
     throw Object.assign(new Error("No existe ciudad destino Bogota"), { status: 400 });
   }
 
-  const [urbanZone, nationalZone, ranges, pricePeriods, activeCities] = await Promise.all([
+  const [urbanZone, nationalZone, ranges, pricePeriods, freightCities] = await Promise.all([
     Zone.findOne({ where: { code: "urbano" } }),
     Zone.findOne({ where: { code: "nacional" } }),
     WeightRange.findAll({ order: [["sortOrder", "ASC"]] }),
@@ -874,9 +874,13 @@ async function previewPurchasePrices({ tableDate, clientId = null }) {
       include: [Product, Client, Currency],
       order: [[Product, "name", "ASC"], [Client, "name", "ASC"]]
     }),
-    City.findAll({
-      where: { isActive: true },
-      order: [["name", "ASC"]]
+    FreightRatePeriod.findAll({
+      where: {
+        destinationCityId: destination.id,
+        ...dateWhere(targetDate)
+      },
+      include: [{ model: City, as: "originCity", where: { isActive: true } }],
+      order: [[{ model: City, as: "originCity" }, "name", "ASC"]]
     })
   ]);
 
@@ -887,11 +891,15 @@ async function previewPurchasePrices({ tableDate, clientId = null }) {
   const rangeMinKgValues = ranges.map((range) => toNumber(range.minKg)).filter((value) => value > 0);
   const minVolumeKg = Math.min(...rangeMinKgValues);
   const maxVolumeKg = Math.max(...rangeMinKgValues);
+  const nationalCities = new Map();
+  for (const period of freightCities) {
+    if (period.originCity && period.originCity.id !== destination.id) {
+      nationalCities.set(String(period.originCity.id), period.originCity);
+    }
+  }
   const cities = [
     { city: destination, zone: urbanZone, kind: "bogota" },
-    ...activeCities
-      .filter((city) => city.id !== destination.id)
-      .map((city) => ({ city, zone: nationalZone, kind: "nacional" }))
+    ...[...nationalCities.values()].map((city) => ({ city, zone: nationalZone, kind: "nacional" }))
   ];
 
   const cards = [];

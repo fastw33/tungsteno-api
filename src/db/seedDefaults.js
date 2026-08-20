@@ -1,10 +1,10 @@
 const {
-  Carrier,
   City,
   Currency,
   FreightRatePeriod,
   FreightRateRow,
   OperationalCostPeriod,
+  Op,
   WeightRange,
   Zone
 } = require("../models");
@@ -28,18 +28,8 @@ const weightRanges = [
   { code: "100_1000", label: "100 kg a 1 tonelada", minKg: 100, maxKg: 1000, sortOrder: 5 }
 ];
 
-const carriers = [
-  { code: "interrapidisimo", name: "Inter Rapidisimo" },
-  { code: "envia", name: "Envia" },
-  { code: "coordinadora", name: "Coordinadora" }
-];
-
 const cities = [
-  { name: "Bogota", department: "Bogota D.C." },
-  { name: "Medellin", department: "Antioquia" },
-  { name: "Cali", department: "Valle del Cauca" },
-  { name: "Barranquilla", department: "Atlantico" },
-  { name: "Cartagena", department: "Bolivar" }
+  { name: "Bogota", department: "Bogota D.C." }
 ];
 
 async function upsertByUnique(model, where, payload) {
@@ -57,6 +47,27 @@ async function createIfMissing(model, where, payload) {
 }
 
 async function seedDefaults() {
+  const placeholderFreights = await FreightRatePeriod.findAll({
+    where: {
+      sourceReference: {
+        [Op.in]: ["base-inicial", "admin-w-simple"]
+      }
+    }
+  });
+  for (const period of placeholderFreights) {
+    const rows = await FreightRateRow.findAll({ where: { freightRatePeriodId: period.id } });
+    const allRowsAreZero = rows.every((row) =>
+      Number(row.basePriceCop) === 0 &&
+      Number(row.additionalKgPriceCop) === 0 &&
+      Number(row.insurancePct) === 0 &&
+      Number(row.minInsuranceCop) === 0
+    );
+    if (allRowsAreZero) {
+      await FreightRateRow.destroy({ where: { freightRatePeriodId: period.id } });
+      await period.destroy();
+    }
+  }
+
   for (const item of currencies) {
     await upsertByUnique(Currency, { code: item.code }, item);
   }
@@ -69,15 +80,10 @@ async function seedDefaults() {
     await upsertByUnique(WeightRange, { code: item.code }, item);
   }
 
-  for (const item of carriers) {
-    await upsertByUnique(Carrier, { code: item.code }, item);
-  }
-
   for (const item of cities) {
     await upsertByUnique(City, { name: item.name, department: item.department }, item);
   }
 
-  const ranges = await WeightRange.findAll();
   const activeZones = await Zone.findAll();
   for (const zone of activeZones) {
     await createIfMissing(
@@ -93,50 +99,6 @@ async function seedDefaults() {
     );
   }
 
-  const inter = await Carrier.findOne({ where: { code: "interrapidisimo" } });
-  const medellin = await City.findOne({ where: { name: "Medellin" } });
-  const bogota = await City.findOne({ where: { name: "Bogota" } });
-  if (inter && medellin && bogota) {
-    const freightPeriod = await createIfMissing(
-      FreightRatePeriod,
-      {
-        carrierId: inter.id,
-        originCityId: medellin.id,
-        destinationCityId: bogota.id,
-        validFrom: "2000-01-01",
-        validTo: "2099-12-31"
-      },
-      {
-        carrierId: inter.id,
-        originCityId: medellin.id,
-        destinationCityId: bogota.id,
-        validFrom: "2000-01-01",
-        validTo: "2099-12-31",
-        sourceType: "estimated",
-        sourceReference: "base-inicial",
-        notes: "Base inicial editable desde Admin W"
-      }
-    );
-    for (const range of ranges) {
-      await createIfMissing(
-        FreightRateRow,
-        {
-          freightRatePeriodId: freightPeriod.id,
-          minBillableKg: range.minKg,
-          maxBillableKg: range.maxKg
-        },
-        {
-          freightRatePeriodId: freightPeriod.id,
-          minBillableKg: range.minKg,
-          maxBillableKg: range.maxKg,
-          basePriceCop: 0,
-          additionalKgPriceCop: 0,
-          insurancePct: 0,
-          minInsuranceCop: 0
-        }
-      );
-    }
-  }
 }
 
 module.exports = {
