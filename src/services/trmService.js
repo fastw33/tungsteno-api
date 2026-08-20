@@ -1,7 +1,9 @@
-const { Currency, ExchangeRate } = require("../models");
+const { Currency, ExchangeRate, Op } = require("../models");
 
 const SFC_TRM_ENDPOINT =
   "https://www.superfinanciera.gov.co/SuperfinancieraWebServiceTRM/TCRMServicesWebService/TCRMServicesWebService";
+const DATOS_GOV_TRM_ENDPOINT =
+  "https://www.datos.gov.co/resource/32sa-8pi3.json?$limit=1&$order=vigenciadesde%20DESC";
 const OPEN_ER_ENDPOINT = "https://open.er-api.com/v6/latest/EUR";
 
 function tagValue(xml, tagName) {
@@ -70,15 +72,90 @@ async function fetchTrmFromSuperfinanciera(targetDate) {
   };
 }
 
+function parseTrmDate(value, fallback) {
+  if (!value) {
+    return fallback;
+  }
+  if (typeof value === "string" && /^\d{2}\/\d{2}\/\d{4}$/.test(value)) {
+    const [day, month, year] = value.split("/");
+    return `${year}-${month}-${day}`;
+  }
+  return dateOnly(value) || fallback;
+}
+
+async function fetchLatestTrmFromDatosGov(targetDate) {
+  const response = await fetch(DATOS_GOV_TRM_ENDPOINT);
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw Object.assign(new Error("No fue posible consultar la TRM en Datos.gov.co"), {
+      status: 502
+    });
+  }
+  const row = Array.isArray(payload) ? payload[0] : payload;
+  const value = Number(row?.valor);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw Object.assign(new Error("Datos.gov.co no retorno una TRM valida"), {
+      status: 502
+    });
+  }
+  return {
+    value,
+    unit: "COP",
+    validityFrom: parseTrmDate(row?.vigenciadesde, targetDate),
+    validityTo: parseTrmDate(row?.vigenciahasta, targetDate),
+    source: "Superfinanciera Datos.gov.co TRM"
+  };
+}
+
+async function fetchUsdTrm(targetDate) {
+  try {
+    return await fetchTrmFromSuperfinanciera(targetDate);
+  } catch (soapError) {
+    try {
+      return await fetchLatestTrmFromDatosGov(targetDate);
+    } catch {
+      throw soapError;
+    }
+  }
+}
+
+async function latestStoredRate(currencyId, targetDate) {
+  const previous = await ExchangeRate.findOne({
+    where: {
+      currencyId,
+      rateDate: { [Op.lte]: targetDate }
+    },
+    order: [["rateDate", "DESC"]]
+  });
+  if (previous) {
+    return previous;
+  }
+  return ExchangeRate.findOne({
+    where: { currencyId },
+    order: [["rateDate", "DESC"]]
+  });
+}
+
 async function syncUsdTrm(targetDate) {
   const usd = await Currency.findOne({ where: { code: "USD" } });
   if (!usd) {
     throw Object.assign(new Error("No existe moneda USD"), { status: 500 });
   }
 
-  const trm = await fetchTrmFromSuperfinanciera(targetDate);
+  let trm;
+  try {
+    trm = await fetchUsdTrm(targetDate);
+  } catch (error) {
+    const fallback = await latestStoredRate(usd.id, targetDate);
+    if (fallback) {
+      return fallback;
+    }
+    throw error;
+  }
   const validDates = datesBetween(trm.validityFrom, trm.validityTo);
-  const datesToStore = validDates.length > 0 ? validDates : [targetDate];
+  const datesToStore = validDates.includes(targetDate)
+    ? validDates
+    : [targetDate, ...validDates];
   for (const rateDate of datesToStore) {
     await ExchangeRate.upsert({
       currencyId: usd.id,
@@ -114,7 +191,16 @@ async function syncEurCop(targetDate) {
     throw Object.assign(new Error("No existe moneda EUR"), { status: 500 });
   }
 
-  const rate = await fetchEurCopRate(targetDate);
+  let rate;
+  try {
+    rate = await fetchEurCopRate(targetDate);
+  } catch (error) {
+    const fallback = await latestStoredRate(eur.id, targetDate);
+    if (fallback) {
+      return fallback;
+    }
+    throw error;
+  }
   await ExchangeRate.upsert({
     currencyId: eur.id,
     rateDate: targetDate,

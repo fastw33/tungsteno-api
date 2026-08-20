@@ -16,6 +16,7 @@ function readCsv(value) {
 
 module.exports = {
   port: Number(process.env.PORT) || 4070,
+  dbSyncOnStart: readBoolean(process.env.DB_SYNC_ON_START, true),
   cors: {
     origins: readCsv(process.env.CORS_ORIGINS),
     methods: readCsv(process.env.CORS_ALLOW_METHODS),
