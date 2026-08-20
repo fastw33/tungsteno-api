@@ -6,6 +6,7 @@ const {
   createOperationalCost,
   createPricingPolicy,
   createProduct,
+  deactivateProduct,
   listClientPrices,
   listClients,
   listExchangeRates,
@@ -18,6 +19,7 @@ const {
   updateClientPrice,
   updateFreightRateRow,
   updateOperationalCost,
+  updateProduct,
   updatePricingPolicy
 } = require("../services/masterDataService");
 const { asyncHandler } = require("../utils/http");
@@ -36,6 +38,20 @@ router.post(
   "/products",
   asyncHandler(async (req, res) => {
     res.status(201).json(await createProduct(req.body));
+  })
+);
+
+router.put(
+  "/products/:id",
+  asyncHandler(async (req, res) => {
+    res.json(await updateProduct(req.params.id, req.body));
+  })
+);
+
+router.delete(
+  "/products/:id",
+  asyncHandler(async (req, res) => {
+    res.json(await deactivateProduct(req.params.id));
   })
 );
 

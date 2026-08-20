@@ -636,6 +636,7 @@ async function getPriceTable(id, options = {}) {
         include: [
           Product,
           Client,
+          ClientPricePeriod,
           Zone,
           WeightRange,
           ExchangeRate,

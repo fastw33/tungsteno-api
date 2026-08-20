@@ -11,6 +11,7 @@ const {
   OperationalCostPeriod,
   PricingPolicyPeriod,
   Product,
+  Op,
   WeightRange,
   Zone
 } = require("../models");
@@ -65,6 +66,58 @@ async function createProduct(payload = {}) {
     note: "Producto creado desde Admin W"
   });
   return created;
+}
+
+async function updateProduct(id, payload = {}) {
+  const product = await Product.findByPk(id);
+  if (!product) {
+    throw Object.assign(new Error("No existe el producto"), { status: 404 });
+  }
+  const beforeData = snapshot(product);
+  const name = cleanText(payload.name) || product.name;
+  const duplicate = await Product.findOne({
+    where: {
+      name,
+      id: { [Op.ne]: product.id }
+    }
+  });
+  if (duplicate) {
+    throw Object.assign(new Error("Ya existe otro producto con ese nombre"), { status: 400 });
+  }
+
+  await product.update({
+    name,
+    family: payload.family === undefined ? product.family : cleanText(payload.family) || "Tungsteno",
+    description: payload.description === undefined ? product.description : cleanText(payload.description),
+    isActive: payload.isActive === undefined ? product.isActive : payload.isActive !== false
+  });
+  await logAdminChange({
+    entityType: "product",
+    entityId: product.id,
+    action: "update",
+    beforeData,
+    afterData: snapshot(product),
+    note: "Producto actualizado desde Admin W"
+  });
+  return Product.findByPk(product.id);
+}
+
+async function deactivateProduct(id) {
+  const product = await Product.findByPk(id);
+  if (!product) {
+    throw Object.assign(new Error("No existe el producto"), { status: 404 });
+  }
+  const beforeData = snapshot(product);
+  await product.update({ isActive: false });
+  await logAdminChange({
+    entityType: "product",
+    entityId: product.id,
+    action: "deactivate",
+    beforeData,
+    afterData: snapshot(product),
+    note: "Producto desactivado desde Admin W"
+  });
+  return product;
 }
 
 async function listClients() {
@@ -459,6 +512,7 @@ module.exports = {
   createOperationalCost,
   createPricingPolicy,
   createProduct,
+  deactivateProduct,
   listClientPrices,
   listClients,
   listExchangeRates,
@@ -471,5 +525,6 @@ module.exports = {
   updateClientPrice,
   updateFreightRateRow,
   updateOperationalCost,
+  updateProduct,
   updatePricingPolicy
 };
