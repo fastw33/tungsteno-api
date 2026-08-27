@@ -24,7 +24,7 @@ const {
   sequelize
 } = require("../models");
 const { decimal, money, ratio, roundDownTo, toNumber } = require("../utils/numbers");
-const { syncUsdTrm } = require("./trmService");
+const { syncEurCop, syncUsdTrm } = require("./trmService");
 
 function dateWhere(targetDate) {
   return {
@@ -55,10 +55,16 @@ async function findExchangeRate(currency, targetDate) {
       rateDate: targetDate
     }
   });
-  if (storedRate || currency.code !== "USD") {
+  if (storedRate) {
     return storedRate;
   }
-  return syncUsdTrm(targetDate);
+  if (currency.code === "USD") {
+    return syncUsdTrm(targetDate);
+  }
+  if (currency.code === "EUR") {
+    return syncEurCop(targetDate);
+  }
+  return null;
 }
 
 async function findOperationalCost(zoneId, targetDate) {
@@ -663,6 +669,317 @@ async function getLatestPriceTable() {
   return table ? getPriceTable(table.id) : null;
 }
 
+function publicIssue(data) {
+  return {
+    productId: data.productId || null,
+    clientId: data.clientId || null,
+    cityId: data.cityId || null,
+    zoneId: data.zoneId || null,
+    weightRangeId: data.weightRangeId || null,
+    issueCode: data.issueCode,
+    message: data.message
+  };
+}
+
+async function calculatePreviewRange({
+  period,
+  zone,
+  city,
+  destination,
+  range,
+  targetDate,
+  minVolumeKg,
+  maxVolumeKg,
+  previousSupplierPriceCopKg
+}) {
+  const exchangeRate = await findExchangeRate(period.Currency, targetDate);
+  if (period.Currency.code !== "COP" && !exchangeRate) {
+    return {
+      issue: publicIssue({
+        productId: period.productId,
+        clientId: period.clientId,
+        cityId: city?.id || null,
+        zoneId: zone.id,
+        weightRangeId: range.id,
+        issueCode: "EXCHANGE_RATE_MISSING",
+        message: `No hay tasa ${period.Currency.code}/COP para ${targetDate}.`
+      })
+    };
+  }
+
+  const operationalCost = zone.code === "nacional"
+    ? null
+    : await findOperationalCost(zone.id, targetDate);
+  if (zone.code !== "nacional" && !operationalCost) {
+    return {
+      issue: publicIssue({
+        productId: period.productId,
+        clientId: period.clientId,
+        cityId: city?.id || null,
+        zoneId: zone.id,
+        weightRangeId: range.id,
+        issueCode: "OPERATIONAL_COST_MISSING",
+        message: `No hay gasto operativo vigente para zona ${zone.code}.`
+      })
+    };
+  }
+
+  const policy = await findPricingPolicy({
+    productId: period.productId,
+    zoneId: zone.id,
+    weightRangeId: range.id,
+    rangeMinKg: range.minKg,
+    targetDate
+  });
+  if (!policy) {
+    return {
+      issue: publicIssue({
+        productId: period.productId,
+        clientId: period.clientId,
+        cityId: city?.id || null,
+        zoneId: zone.id,
+        weightRangeId: range.id,
+        issueCode: "PRICING_POLICY_MISSING",
+        message: "No hay politica de margen vigente."
+      })
+    };
+  }
+
+  const rateToCop = period.Currency.code === "COP" ? 1 : exchangeRate.rateToCop;
+  const clientPriceCopKg = money(decimal(period.pricePerKg).mul(rateToCop));
+  const realWeightKg = toNumber(range.minKg);
+  const volumetricWeightKg = 0;
+  const billableWeightKg = realWeightKg;
+  let freightTotalCop = 0;
+  let freightRow = null;
+  let carrier = null;
+
+  if (zone.code === "nacional") {
+    const freight = await findNationalFreight({
+      originCityId: city.id,
+      destinationCityId: destination.id,
+      targetDate,
+      billableWeightKg,
+      realWeightKg,
+      declaredValueCop: decimal(clientPriceCopKg).mul(realWeightKg)
+    });
+    if (!freight) {
+      return {
+        issue: publicIssue({
+          productId: period.productId,
+          clientId: period.clientId,
+          cityId: city.id,
+          zoneId: zone.id,
+          weightRangeId: range.id,
+          issueCode: "FREIGHT_RATE_MISSING",
+          message: "No hay flete nacional vigente para origen, destino y peso."
+        })
+      };
+    }
+    freightTotalCop = freight.total;
+    freightRow = freight.row;
+    carrier = freight.period.Carrier;
+  }
+
+  const appliedGrossMarginPct = calculateMarginForVolume({
+    minGrossMarginPct: policy.minGrossMarginPct || policy.targetGrossMarginPct,
+    maxGrossMarginPct: policy.maxGrossMarginPct || policy.targetGrossMarginPct,
+    realWeightKg,
+    minVolumeKg,
+    maxVolumeKg
+  });
+  const calculated = calculatePrices({
+    clientPriceCopKg,
+    operationalCostCopKg: operationalCost?.costCopPerKg || 0,
+    freightTotalCop,
+    realWeightKg,
+    minGrossMarginPct: policy.minGrossMarginPct,
+    appliedGrossMarginPct,
+    maxGrossMarginPct: policy.maxGrossMarginPct,
+    minimumSupplierPriceCopKg: previousSupplierPriceCopKg,
+    roundingCop: policy.roundingCop
+  });
+
+  return {
+    range: {
+      productId: period.productId,
+      clientId: period.clientId,
+      zoneId: zone.id,
+      weightRangeId: range.id,
+      exchangeRateId: exchangeRate?.id || null,
+      operationalCostPeriodId: operationalCost?.id || null,
+      pricingPolicyPeriodId: policy.id,
+      freightRateRowId: freightRow?.id || null,
+      carrierId: carrier?.id || null,
+      originCityId: zone.code === "nacional" ? city.id : null,
+      destinationCityId: zone.code === "nacional" ? destination.id : null,
+      Product: period.Product,
+      Client: period.Client,
+      Currency: period.Currency,
+      ClientPricePeriod: period,
+      Zone: zone,
+      WeightRange: range,
+      ExchangeRate: exchangeRate,
+      Carrier: carrier,
+      originCity: zone.code === "nacional" ? city : null,
+      destinationCity: zone.code === "nacional" ? destination : null,
+      realWeightKg,
+      volumetricWeightKg,
+      billableWeightKg,
+      clientPriceCopKg,
+      operationalCostCopKg: operationalCost?.costCopPerKg || 0,
+      freightTotalCop,
+      freightCopKg: calculated.freightCopKg,
+      minGrossMarginPct: policy.minGrossMarginPct || policy.targetGrossMarginPct,
+      targetGrossMarginPct: appliedGrossMarginPct.toDecimalPlaces(6, Decimal.ROUND_HALF_UP).toNumber(),
+      maxGrossMarginPct: policy.maxGrossMarginPct || policy.targetGrossMarginPct,
+      netPurchasePriceCopKg: calculated.netPurchasePriceCopKg,
+      aggressivePurchasePriceCopKg: calculated.aggressivePurchasePriceCopKg,
+      supplierPriceCopKg: calculated.supplierPriceCopKg,
+      maxPurchasePriceCopKg: calculated.maxPurchasePriceCopKg,
+      totalPurchaseAndExpenseCop: calculated.totalPurchaseAndExpenseCop,
+      expectedGrossMarginPct: calculated.expectedGrossMarginPct
+    }
+  };
+}
+
+function summarizeCityProducts(products) {
+  const prices = products.flatMap((product) =>
+    product.ranges.map((range) => toNumber(range.supplierPriceCopKg))
+  ).filter((value) => value > 0);
+  return {
+    productCount: products.length,
+    rangeCount: products.reduce((sum, product) => sum + product.ranges.length, 0),
+    minSupplierPriceCopKg: prices.length ? Math.min(...prices) : null,
+    maxSupplierPriceCopKg: prices.length ? Math.max(...prices) : null
+  };
+}
+
+async function previewPurchasePrices({ tableDate, clientId = null }) {
+  const targetDate = tableDate || new Date().toISOString().slice(0, 10);
+  const destination = await resolveDestinationCity(null);
+  if (!destination) {
+    throw Object.assign(new Error("No existe ciudad destino Bogota"), { status: 400 });
+  }
+
+  const [urbanZone, nationalZone, ranges, pricePeriods, freightCities] = await Promise.all([
+    Zone.findOne({ where: { code: "urbano" } }),
+    Zone.findOne({ where: { code: "nacional" } }),
+    WeightRange.findAll({ order: [["sortOrder", "ASC"]] }),
+    ClientPricePeriod.findAll({
+      where: {
+        status: "active",
+        ...(clientId ? { clientId } : {}),
+        validFrom: { [Op.lte]: targetDate },
+        validTo: { [Op.gte]: targetDate }
+      },
+      include: [Product, Client, Currency],
+      order: [[Product, "name", "ASC"], [Client, "name", "ASC"]]
+    }),
+    FreightRatePeriod.findAll({
+      where: {
+        destinationCityId: destination.id,
+        ...dateWhere(targetDate)
+      },
+      include: [{ model: City, as: "originCity", where: { isActive: true } }],
+      order: [[{ model: City, as: "originCity" }, "name", "ASC"]]
+    })
+  ]);
+
+  if (!urbanZone || !nationalZone) {
+    throw Object.assign(new Error("Faltan zonas urbano/nacional en catalogo"), { status: 400 });
+  }
+
+  const rangeMinKgValues = ranges.map((range) => toNumber(range.minKg)).filter((value) => value > 0);
+  const minVolumeKg = Math.min(...rangeMinKgValues);
+  const maxVolumeKg = Math.max(...rangeMinKgValues);
+  const nationalCities = new Map();
+  for (const period of freightCities) {
+    if (period.originCity && period.originCity.id !== destination.id) {
+      nationalCities.set(String(period.originCity.id), period.originCity);
+    }
+  }
+  const cities = [
+    { city: destination, zone: urbanZone, kind: "bogota" },
+    ...[...nationalCities.values()].map((city) => ({ city, zone: nationalZone, kind: "nacional" }))
+  ];
+
+  const cards = [];
+  const allIssues = [];
+  const rateMap = new Map();
+
+  for (const cityEntry of cities) {
+    const products = [];
+    const cityIssues = [];
+
+    for (const period of pricePeriods) {
+      if (!period.Product?.isActive || !period.Client?.isActive) {
+        continue;
+      }
+
+      let previousSupplierPriceCopKg = 0;
+      const productRanges = [];
+      for (const range of ranges) {
+        const result = await calculatePreviewRange({
+          period,
+          zone: cityEntry.zone,
+          city: cityEntry.city,
+          destination,
+          range,
+          targetDate,
+          minVolumeKg,
+          maxVolumeKg,
+          previousSupplierPriceCopKg
+        });
+        if (result.issue) {
+          cityIssues.push(result.issue);
+          allIssues.push(result.issue);
+          continue;
+        }
+        previousSupplierPriceCopKg = result.range.supplierPriceCopKg;
+        if (result.range.ExchangeRate) {
+          rateMap.set(
+            `${result.range.ExchangeRate.currencyId}-${result.range.ExchangeRate.rateDate}`,
+            result.range.ExchangeRate
+          );
+        }
+        productRanges.push(result.range);
+      }
+
+      if (productRanges.length > 0) {
+        const productPrices = productRanges.map((range) => toNumber(range.supplierPriceCopKg));
+        products.push({
+          product: period.Product,
+          client: period.Client,
+          currency: period.Currency,
+          clientPricePeriod: period,
+          minSupplierPriceCopKg: Math.min(...productPrices),
+          maxSupplierPriceCopKg: Math.max(...productPrices),
+          ranges: productRanges
+        });
+      }
+    }
+
+    cards.push({
+      id: `${cityEntry.kind}-${cityEntry.city.id}`,
+      kind: cityEntry.kind,
+      city: cityEntry.city,
+      zone: cityEntry.zone,
+      products,
+      issues: cityIssues,
+      summary: summarizeCityProducts(products)
+    });
+  }
+
+  return {
+    tableDate: targetDate,
+    destinationCity: destination,
+    exchangeRates: [...rateMap.values()],
+    cards,
+    issues: allIssues
+  };
+}
+
 async function listPriceHistory({ productId, clientId, zoneId, weightRangeId, from, to, limit = 31, offset = 0 }) {
   const tableWhere = {};
   if (from || to) {
@@ -700,5 +1017,6 @@ module.exports = {
   generateDailyPriceTable,
   getLatestPriceTable,
   getPriceTable,
+  previewPurchasePrices,
   listPriceHistory
 };

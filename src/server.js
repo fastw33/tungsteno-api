@@ -1,14 +1,18 @@
 const app = require("./app");
 const env = require("./config/env");
 const { sequelize } = require("./models");
+const { cleanupUnusedTables } = require("./db/cleanupUnusedTables");
+const { ensureDatabase } = require("./db/ensureDatabase");
 const { seedDefaults } = require("./db/seedDefaults");
 
 async function start() {
   try {
+    await ensureDatabase();
     await sequelize.authenticate();
     if (env.dbSyncOnStart) {
       await sequelize.sync({ alter: true });
       await seedDefaults();
+      await cleanupUnusedTables();
       console.log("Base de datos tungsteno preparada.");
     }
     await new Promise((resolve, reject) => {
